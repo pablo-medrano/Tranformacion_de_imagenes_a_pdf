@@ -1,13 +1,11 @@
 import os
 import cv2
-import torch
-from copy import deepcopy
 from PIL import Image
-from realesrgan import RealESRGANer
 from pypdf import PdfReader, PdfWriter, Transformation
+from copy import deepcopy
 
 # ========================
-# PROCESO 1: Conversión y Upscaling de Imágenes
+# PROCESO 1: Conversión de Imágenes (sin upscaling)
 # ========================
 def convert_webp_to_jpg(input_path: str, output_path: str, quality: int = 90):
     """
@@ -21,31 +19,12 @@ def convert_webp_to_jpg(input_path: str, output_path: str, quality: int = 90):
     except Exception as e:
         print(f"Error al convertir {input_path}: {e}")
 
-def upscale_image(input_path: str, output_path: str, scale: int = 4):
-    """
-    Realiza un upscaling de la imagen usando Real-ESRGANer.
-    """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    try:
-        model = RealESRGANer(
-            device=device,
-            scale=scale,
-            model_path=f"RealESRGAN_x{scale}plus.pth",
-            half=True  # usa half precision si está disponible
-        )
-        img = Image.open(input_path).convert("RGB")
-        sr_image, _ = model.enhance(img, outscale=scale)
-        sr_image.save(output_path)
-        print(f"Escalado: {input_path} --> {output_path}")
-    except Exception as e:
-        print(f"Error al escalar {input_path}: {e}")
-
 def process_images(input_folder: str = "producto_inicio", 
                    output_folder: str = "producto_final/transformaciones"):
     """
     Procesa todas las imágenes (WEBP, JPG, JPEG, PNG):
       - Si la imagen es WEBP, se convierte a JPG.
-      - Aplica upscaling a la imagen.
+      - Si la imagen es JPG, JPEG o PNG, se copia directamente a la carpeta de salida.
     """
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -53,17 +32,20 @@ def process_images(input_folder: str = "producto_inicio",
     for filename in os.listdir(input_folder):
         base, ext = os.path.splitext(filename)
         ext = ext.lower()
-        if ext in [".webp", ".jpg", ".jpeg", ".png"]:
-            input_path = os.path.join(input_folder, filename)
-            # Si es WEBP se convierte a JPG
-            if ext == ".webp":
-                temp_jpg = os.path.join(output_folder, f"{base}.jpg")
-                convert_webp_to_jpg(input_path, temp_jpg)
-                source_for_upscale = temp_jpg
-            else:
-                source_for_upscale = input_path
-            final_path = os.path.join(output_folder, f"{base}_upscaled.jpg")
-            upscale_image(source_for_upscale, final_path)
+        input_path = os.path.join(input_folder, filename)
+        if ext == ".webp":
+            # Convertir WEBP a JPG
+            output_path = os.path.join(output_folder, f"{base}.jpg")
+            convert_webp_to_jpg(input_path, output_path)
+        elif ext in [".jpg", ".jpeg", ".png"]:
+            # Copiar la imagen sin modificaciones
+            output_path = os.path.join(output_folder, filename)
+            try:
+                with Image.open(input_path) as img:
+                    img.convert("RGB").save(output_path)
+                print(f"Copiado: {input_path} --> {output_path}")
+            except Exception as e:
+                print(f"Error al copiar {input_path}: {e}")
 
 # ========================
 # PROCESO 2: Conversión de Imágenes a PDF
@@ -82,7 +64,7 @@ def get_unique_filename(folder, base_name, extension):
 def convert_images_to_pdf(input_folder: str = "producto_final/transformaciones", 
                           output_folder: str = "producto_final/archivos_pdf"):
     """
-    Convierte las imágenes (JPG o PNG) de la carpeta de entrada a PDF usando un modelo de superresolución.
+    Convierte las imágenes (JPG o PNG) de la carpeta de entrada a PDF.
     """
     os.makedirs(output_folder, exist_ok=True)
 
@@ -100,6 +82,7 @@ def convert_images_to_pdf(input_folder: str = "producto_final/transformaciones",
             if img is None:
                 print(f"No se pudo leer la imagen {file}.")
                 continue
+            # Se aplica el superresolución (si se desea conservar esta parte)
             enhanced_img = sr.upsample(img)
             enhanced_img_rgb = cv2.cvtColor(enhanced_img, cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(enhanced_img_rgb)
