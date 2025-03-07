@@ -9,11 +9,11 @@ from pypdf import PdfReader, PdfWriter, Transformation
 # Función para modificar el nombre base de la imagen
 def get_modified_basename(base_name: str) -> str:
     """
-    Reemplaza la cadena "-Xn_waifu2x_noise3_scale4x" por "n COPIAS", donde n es el dígito.
-    Por ejemplo: "BT14-069-X1_waifu2x_noise3_scale4x" se transforma en "BT14-069 1 COPIAS".
+    Reemplaza la cadena "-Xn_waifu2x_noise3_scale4x" por "(n COPIAS)".
+    Por ejemplo: "BT14-069-X1_waifu2x_noise3_scale4x" se transforma en "BT14-069 (1 COPIAS)".
     """
     pattern = r"-X(\d)_waifu2x_noise3_scale4x"
-    modified = re.sub(pattern, r" \1 COPIAS", base_name)
+    modified = re.sub(pattern, r" (\1 COPIAS)", base_name)
     return modified.strip()
 
 # ========================
@@ -167,7 +167,7 @@ def main():
             print("\n--- Proceso 2: Convertir imágenes a PDF (TEMP transformaciones -> TEMP archivos_pdf) ---")
             convert_images_to_pdf(input_folder=temp_transform, output_folder=temp_pdf)
             
-            print("\n--- Proceso 3: Corregir dimensiones de PDFs (TEMP archivos_pdf -> pdf_corregidos) ---")
+            print("\n--- Proceso 3: Corrección de dimensiones de PDFs (TEMP archivos_pdf -> pdf_corregidos) ---")
             correct_pdfs(input_folder=temp_pdf, output_folder=final_pdf_folder)
     
     print("\nPipeline completado. Revisa la carpeta 'producto_final/pdf_corregidos' para ver los resultados finales.")
