@@ -1,8 +1,20 @@
 import os
 import cv2
+import tempfile
+import re
+from copy import deepcopy
 from PIL import Image
 from pypdf import PdfReader, PdfWriter, Transformation
-from copy import deepcopy
+
+# Función para modificar el nombre base de la imagen
+def get_modified_basename(base_name: str) -> str:
+    """
+    Reemplaza la cadena "-Xn_waifu2x_noise3_scale4x" por "n COPIAS", donde n es el dígito.
+    Por ejemplo: "BT14-069-X1_waifu2x_noise3_scale4x" se transforma en "BT14-069 1 COPIAS".
+    """
+    pattern = r"-X(\d)_waifu2x_noise3_scale4x"
+    modified = re.sub(pattern, r" \1 COPIAS", base_name)
+    return modified.strip()
 
 # ========================
 # PROCESO 1: Conversión de Imágenes (sin upscaling)
@@ -19,12 +31,11 @@ def convert_webp_to_jpg(input_path: str, output_path: str, quality: int = 90):
     except Exception as e:
         print(f"Error al convertir {input_path}: {e}")
 
-def process_images(input_folder: str = "producto_inicio", 
-                   output_folder: str = "producto_final/transformaciones"):
+def process_images(input_folder: str, output_folder: str):
     """
     Procesa todas las imágenes (WEBP, JPG, JPEG, PNG):
       - Si la imagen es WEBP, se convierte a JPG.
-      - Si la imagen es JPG, JPEG o PNG, se copia directamente a la carpeta de salida.
+      - Si es JPG, JPEG o PNG, se copia directamente.
     """
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
@@ -34,11 +45,9 @@ def process_images(input_folder: str = "producto_inicio",
         ext = ext.lower()
         input_path = os.path.join(input_folder, filename)
         if ext == ".webp":
-            # Convertir WEBP a JPG
             output_path = os.path.join(output_folder, f"{base}.jpg")
             convert_webp_to_jpg(input_path, output_path)
         elif ext in [".jpg", ".jpeg", ".png"]:
-            # Copiar la imagen sin modificaciones
             output_path = os.path.join(output_folder, filename)
             try:
                 with Image.open(input_path) as img:
@@ -61,14 +70,14 @@ def get_unique_filename(folder, base_name, extension):
         counter += 1
     return filename
 
-def convert_images_to_pdf(input_folder: str = "producto_final/transformaciones", 
-                          output_folder: str = "producto_final/archivos_pdf"):
+def convert_images_to_pdf(input_folder: str, output_folder: str):
     """
     Convierte las imágenes (JPG o PNG) de la carpeta de entrada a PDF.
+    Se utiliza el modelo de superresolución ESPCN x3 para mejorar la calidad.
+    Además, se modifica el nombre de los archivos para sustituir la cadena especial.
     """
     os.makedirs(output_folder, exist_ok=True)
 
-    # Cargar modelo de superresolución (ESPCN x3)
     sr = cv2.dnn_superres.DnnSuperResImpl_create()
     model_path = "ESPCN_x3.pb"
     sr.readModel(model_path)
@@ -77,17 +86,18 @@ def convert_images_to_pdf(input_folder: str = "producto_final/transformaciones",
     for file in os.listdir(input_folder):
         if file.lower().endswith((".png", ".jpg", ".jpeg")):
             base_original = os.path.splitext(file)[0]
+            # Aplicar el reemplazo para modificar el nombre base
+            modified_base = get_modified_basename(base_original)
             image_path = os.path.join(input_folder, file)
             img = cv2.imread(image_path)
             if img is None:
                 print(f"No se pudo leer la imagen {file}.")
                 continue
-            # Se aplica el superresolución (si se desea conservar esta parte)
             enhanced_img = sr.upsample(img)
             enhanced_img_rgb = cv2.cvtColor(enhanced_img, cv2.COLOR_BGR2RGB)
             pil_image = Image.fromarray(enhanced_img_rgb)
             
-            unique_pdf_name = get_unique_filename(output_folder, base_original, ".pdf")
+            unique_pdf_name = get_unique_filename(output_folder, modified_base, ".pdf")
             pdf_path = os.path.join(output_folder, unique_pdf_name)
             pil_image.convert('RGB').save(pdf_path)
             print(f"Guardado: {pdf_path}")
@@ -127,8 +137,7 @@ def process_pdf(input_pdf_path, output_pdf_path):
         writer.write(f)
     print(f"Procesado: {os.path.basename(input_pdf_path)} -> {os.path.basename(output_pdf_path)}")
 
-def correct_pdfs(input_folder: str = "producto_final/archivos_pdf", 
-                 output_folder: str = "producto_final/pdf_corregidos"):
+def correct_pdfs(input_folder: str, output_folder: str):
     os.makedirs(output_folder, exist_ok=True)
     for file in os.listdir(input_folder):
         if file.lower().endswith(".pdf"):
@@ -142,16 +151,26 @@ def correct_pdfs(input_folder: str = "producto_final/archivos_pdf",
 def main():
     print("Ejecutando el Pipeline Completo...\n")
     
-    print("--- Proceso 1: Procesar imágenes (producto_inicio -> producto_final/transformaciones) ---")
-    process_images()
+    # Directorio final para los PDFs corregidos
+    final_pdf_folder = os.path.join("producto_final", "pdf_corregidos")
+    os.makedirs(final_pdf_folder, exist_ok=True)
     
-    print("\n--- Proceso 2: Convertir imágenes a PDF (producto_final/transformaciones -> producto_final/archivos_pdf) ---")
-    convert_images_to_pdf()
+    # Crear directorios temporales para los resultados intermedios
+    with tempfile.TemporaryDirectory() as temp_transform:
+        with tempfile.TemporaryDirectory() as temp_pdf:
+            print(f"Directorio temporal para imágenes transformadas: {temp_transform}")
+            print(f"Directorio temporal para PDF generados: {temp_pdf}")
+            
+            print("\n--- Proceso 1: Procesar imágenes (producto_inicio -> TEMP transformaciones) ---")
+            process_images(input_folder="producto_inicio", output_folder=temp_transform)
+            
+            print("\n--- Proceso 2: Convertir imágenes a PDF (TEMP transformaciones -> TEMP archivos_pdf) ---")
+            convert_images_to_pdf(input_folder=temp_transform, output_folder=temp_pdf)
+            
+            print("\n--- Proceso 3: Corregir dimensiones de PDFs (TEMP archivos_pdf -> pdf_corregidos) ---")
+            correct_pdfs(input_folder=temp_pdf, output_folder=final_pdf_folder)
     
-    print("\n--- Proceso 3: Corregir dimensiones de PDFs (producto_final/archivos_pdf -> producto_final/pdf_corregidos) ---")
-    correct_pdfs()
-    
-    print("\nPipeline completado. Revisa la carpeta 'producto_final' para ver los resultados finales.")
+    print("\nPipeline completado. Revisa la carpeta 'producto_final/pdf_corregidos' para ver los resultados finales.")
 
 if __name__ == "__main__":
     main()
